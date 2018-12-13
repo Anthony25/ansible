@@ -99,7 +99,7 @@ EXAMPLES = r'''
   connection: local
   hosts: localhost
   gather_facts: False
-   tasks:
+  tasks:
     - name: Create prefix within Netbox with only required information
       netbox_prefix:
         netbox_url: http://netbox.local
@@ -108,7 +108,7 @@ EXAMPLES = r'''
           prefix: 10.156.0.0/19
         state: present
 
-     - name: Delete prefix within netbox
+    - name: Delete prefix within netbox
       netbox_prefix:
         netbox_url: http://netbox.local
         netbox_token: thisIsMyToken
@@ -116,7 +116,7 @@ EXAMPLES = r'''
           prefix: 10.156.0.0/19
         state: absent
 
-     - name: Create prefix with several specified options
+    - name: Create prefix with several specified options
       netbox_prefix:
         netbox_url: http://netbox.local
         netbox_token: thisIsMyToken
@@ -134,7 +134,7 @@ EXAMPLES = r'''
             - Schnozzberry
         state: present
 
-     - name: Remove prefix
+    - name: Remove prefix
       netbox_prefix:
         netbox_url: http://netbox.local
         netbox_token: thisIsMyToken
