@@ -9,7 +9,7 @@ API_APPS_ENDPOINTS = dict(
     circuits=[],
     dcim=["device_roles", "device_types", "devices", "interfaces", "platforms", "racks", "sites"],
     extras=[],
-    ipam=["ip_addresses", "prefixes", "vrfs"],
+    ipam=["ip_addresses", "prefixes", "roles", "vlans", "vrfs"],
     secrets=[],
     tenancy=["tenants", "tenant_groups"],
     virtualization=["clusters"]
@@ -28,9 +28,11 @@ QUERY_TYPES = dict(
     primary_ip6="address",
     rack="slug",
     region="slug",
+    role="slug",
     site="slug",
     tenant="slug",
     tenant_group="slug",
+    vlan="name",
     vrf="name"
 )
 
@@ -46,9 +48,11 @@ CONVERT_TO_ID = dict(
     primary_ip4="ip_addresses",
     primary_ip6="ip_addresses",
     rack="racks",
+    role="roles",
     site="sites",
     tenant="tenants",
     tenant_group="tenant_groups",
+    vlan="vlans",
     vrf="vrfs"
 )
 
@@ -135,7 +139,10 @@ def find_ids(nb, data):
                     except ValueError:
                         return {"failed": "Multiple results found while searching for %s: %s - Specify a VRF within %s" % (k, v["address"], k)}
             else:
-                query_id = nb_endpoint.get(**{QUERY_TYPES.get(k, "q"): search})
+                try:
+                    query_id = nb_endpoint.get(**{QUERY_TYPES.get(k, "q"): search})
+                except ValueError:
+                    return {"failed": "Multiple results found while searching for key: %s" % (k)}
 
             if query_id:
                 data[k] = query_id.id
