@@ -65,6 +65,7 @@ NO_DEFAULT_ID = set([
     "primary_ip",
     "primary_ip4",
     "primary_ip6",
+    "vlan",
     "vrf",
     "nat_inside",
     "nat_outside"
@@ -138,6 +139,34 @@ def find_ids(nb, data):
                         query_id = nb_endpoint.get(**{"address": v["address"]})
                     except ValueError:
                         return {"failed": "Multiple results found while searching for %s: %s - Specify a VRF within %s" % (k, v["address"], k)}
+            elif k == "vlan":
+                vlan_dict = {}
+                if v.get("name"):
+                    vlan_dict.update({"name": v["name"]})
+                if v.get("site"):
+                    site_id = nb.dcim.sites.get(**{"name": v["site"]})
+                    try:
+                        vlan_dict.update({"site_id": site_id.id})
+                    except AttributeError:
+                        return {"failed": "Did not find any results for site - The search is case-senstive"}
+                if v.get("vlan_group"):
+                    vlan_group_id = nb.ipam.vlan_groups.get(**{"name": v["vlan_group"]})
+                    try:
+                        vlan_dict.update({"group_id": vlan_group_id.id})
+                    except AttributeError:
+                        return {"failed": "Did not find any results for vlan_group - The search is case-senstive"}
+                if v.get("tenant"):
+                    tenant_id = nb.tenancy.tenants.get(**{"name": v["tenant"]})
+                    try:
+                        vlan_dict.update({"tenant_id": tenant_id.id})
+                    except AttributeError:
+                        return {"failed": "Did not find any results for tenant - The search is case-senstive"}
+
+                try:
+                    query_id = nb_endpoint.get(**vlan_dict)
+                except ValueError:
+                    return {"failed": "Multiple results found while searching for key: %s" % (k)}
+
             else:
                 try:
                     query_id = nb_endpoint.get(**{QUERY_TYPES.get(k, "q"): search})

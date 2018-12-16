@@ -38,7 +38,7 @@ options:
     suboptions:
       family:
         description:
-          - Specifies with prefix family the prefix prefix belongs to
+          - Specifies which address family the prefix prefix belongs to
         choices:
           - 4
           - 6
@@ -53,7 +53,7 @@ options:
           - VRF that prefix is associated with
       tenant:
         description:
-          - The tenant that the device will be assigned to
+          - The tenant that the prefix will be assigned to
       vlan:
         description:
           - The VLAN the prefix will be assigned to
@@ -70,17 +70,17 @@ options:
           - The role of the prefix
       is_pool:
         description:
-          - All IP prefixes within this prefix are considered usable
+          - All IP Addresses within this prefix are considered usable
         type: bool
       description:
         description:
-          - The description of the interface
+          - The description of the prefix
       tags:
         description:
           - Any tags that the prefix may need to be associated with
       custom_fields:
         description:
-          - must exist in Netbox
+          - Must exist in Netbox and in key/value format
     required: true
   state:
     description:
