@@ -1,15 +1,14 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 # Copyright: (c) 2018, Mikhail Yohman (@fragmentedpacket) <mikhail.yohman@gmail.com>
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
-ANSIBLE_METADATA = {'metadata_version': '1.1',
-                    'status': ['preview'],
-                    'supported_by': 'community'}
+ANSIBLE_METADATA = {"metadata_version": "1.1",
+                    "status": ["preview"],
+                    "supported_by": "community"}
 
-DOCUMENTATION = r'''
+DOCUMENTATION = r"""
 ---
 module: netbox_prefix
 short_description: Creates or removes prefixes from Netbox
@@ -22,7 +21,7 @@ author:
   - Mikhail Yohman (@FragmentedPacket)
 requirements:
   - pynetbox
-version_added: '2.8'
+version_added: "2.8"
 options:
   netbox_url:
     description:
@@ -90,11 +89,11 @@ options:
   validate_certs:
     description:
       - If C(no), SSL certificates will not be validated. This should only be used on personally controlled sites using self-signed certificates.
-    default: 'yes'
+    default: "yes"
     type: bool
-'''
+"""
 
-EXAMPLES = r'''
+EXAMPLES = r"""
 - name: "Test Netbox prefix module"
   connection: local
   hosts: localhost
@@ -126,6 +125,11 @@ EXAMPLES = r'''
           site: NOC - Test
           vrf: Guest
           tenant: Test Tenant
+          vlan:
+            name: Test VLAN
+            site: Test Site
+            tenant: Test Tenant
+            vlan_group: Test Vlan Group
           status: Reserved
           role: Backup
           description: Test description
@@ -141,14 +145,14 @@ EXAMPLES = r'''
         data:
           prefix: 10.156.32.0/19
         state: absent
-'''
+"""
 
-RETURN = r'''
+RETURN = r"""
 meta:
-  description: Message indicating failure or returns results with the object created within Netbox
+  description: Message indicating failure or success and returns results with the object created within Netbox
   returned: always
-  type: list
-'''
+  type: dict
+"""
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.net_tools.netbox.netbox_utils import find_ids, normalize_data, PREFIX_STATUS
@@ -161,62 +165,119 @@ except ImportError:
 
 
 def netbox_create_prefix(nb, nb_endpoint, data):
-    result = []
-    if not nb_endpoint.get(prefix=data["prefix"]):
+    result = {}
+    prefix_list = data["prefix"].split('/')
+    network = prefix_list[0]
+    mask = prefix_list[1]
+    if data.get("vrf"):
         norm_data = normalize_data(data)
-
         if norm_data.get("status"):
             norm_data["status"] = PREFIX_STATUS.get(norm_data["status"].lower())
 
         data = find_ids(nb, norm_data)
 
-        if data.get('failed'):
-            result.append(data)
+        if data.get("failed"):
+            result.update(data)
+            return result
+        try:
+            endpoint = nb_endpoint.get(q=network,mask_length=mask,vrf_id=data["vrf"])
+        except ValueError:
+            result.update({"failed": "Returned more than one result"})
             return result
 
-        try:
-            return nb_endpoint.create([norm_data])
-        except pynetbox.RequestError as e:
-            return json.loads(e.error)
-
+        if not endpoint:
+            try:
+                resp = nb_endpoint.create(data)
+                resp_ser = resp.serialize()
+                result.update({'success': resp_ser})
+            except pynetbox.RequestError as e:
+                return json.loads(e.error)
+        else:
+            result.update({"failed": "%s already exists in Netbox" % (data["prefix"])})
+    
     else:
-        result.append({'failed': '%s already exists in Netbox' % (data["prefix"])})
+        try:
+            endpoint = nb_endpoint.get(q=network,mask_length=mask,vrf="null")
+        except ValueError:
+            result.update({"failed": "Returned more than one result. Try specifying VRF."})
+            return result
+        if not endpoint:
+            norm_data = normalize_data(data)
+
+            if norm_data.get("status"):
+                norm_data["status"] = PREFIX_STATUS.get(norm_data["status"].lower())
+
+            data = find_ids(nb, norm_data)
+
+            if data.get("failed"):
+                result.update(data)
+                return result
+
+            try:
+                resp = nb_endpoint.create(data)
+                resp_ser = resp.serialize()
+                result.update({'success': resp_ser})
+            except pynetbox.RequestError as e:
+                return json.loads(e.error)
+        else:
+            result.update({"failed": "%s already exists in Netbox" % (data["prefix"])})
 
     return result
 
 
-def netbox_delete_prefix(nb_endpoint, data):
+def netbox_delete_prefix(nb, nb_endpoint, data):
     norm_data = normalize_data(data)
-    endpoint = nb_endpoint.get(prefix=norm_data["prefix"])
-    result = []
-    try:
-        if endpoint.delete():
-            result.append({'success': '%s deleted from Netbox' % (norm_data["prefix"])})
-    except AttributeError:
-        result.append({'failed': '%s not found' % (norm_data["prefix"])})
+    prefix_list = data["prefix"].split("/")
+    network = prefix_list[0]
+    mask = prefix_list[1]
+    result = {}
+    if data.get("vrf"):
+        data = find_ids(nb, norm_data)
+        try:
+            endpoint = nb_endpoint.get(q=network,mask_length=mask,vrf_id=data["vrf"])
+        except ValueError:
+            result.update({"failed": "Returned more than one result"})
+            return result
+
+        try:
+            if endpoint.delete():
+                result.update({"success": "%s deleted from Netbox" % (norm_data["prefix"])})
+        except AttributeError:
+            result.update({"failed": "%s not found" % (norm_data["prefix"])})
+    else:
+        try:
+            endpoint = nb_endpoint.get(q=network,mask_length=mask,vrf="null")
+        except ValueError:
+            result.update({"failed": "Returned more than one result. Try specifying VRF"})
+            return result
+        try:
+            if endpoint.delete():
+                result.update({"success": "%s deleted from Netbox" % (norm_data["prefix"])})
+        except AttributeError:
+            result.update({"failed": "%s not found" % (norm_data["prefix"])})
     return result
 
 
 def main():
-    '''
+    """
     Main entry point for module execution
-    '''
+    """
     argument_spec = dict(
         netbox_url=dict(type="str", required=True),
         netbox_token=dict(type="str", required=True, no_log=True),
         data=dict(type="dict", required=True),
-        state=dict(required=False, default='present', choices=['present', 'absent']),
+        state=dict(required=False, default="present", choices=["present", "absent"]),
         validate_certs=dict(type="bool", default=True)
     )
     module = AnsibleModule(argument_spec=argument_spec,
                            supports_check_mode=False)
     # Fail module if pynetbox is not installed
     if not HAS_PYNETBOX:
-        module.fail_json(msg='pynetbox is required for this module')
+        module.fail_json(msg="pynetbox is required for this module")
     # Assign variables to be used with module
     changed = False
-    app = 'ipam'
-    endpoint = 'prefixes'
+    app = "ipam"
+    endpoint = "prefixes"
     url = module.params["netbox_url"]
     token = module.params["netbox_token"]
     data = module.params["data"]
@@ -232,16 +293,17 @@ def main():
     except AttributeError:
         module.fail_json(msg="Incorrect application specified: %s" % (app))
     nb_endpoint = getattr(nb_app, endpoint)
-    if 'present' in state:
+    if "present" in state:
         response = netbox_create_prefix(nb, nb_endpoint, data)
-        if response[0].get('created'):
+        if response.get("success"):
             changed = True
     else:
-        response = netbox_delete_prefix(nb_endpoint, data)
-        if 'success' in response[0]:
+        response = netbox_delete_prefix(nb, nb_endpoint, data)
+        if response.get("success"):
             changed = True
     module.exit_json(changed=changed, meta=response)
 
 
 if __name__ == "__main__":
     main()
+

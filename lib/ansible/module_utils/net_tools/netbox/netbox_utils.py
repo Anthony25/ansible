@@ -9,7 +9,7 @@ API_APPS_ENDPOINTS = dict(
     circuits=[],
     dcim=["device_roles", "device_types", "devices", "interfaces", "platforms", "racks", "sites"],
     extras=[],
-    ipam=["ip_addresses", "prefixes", "roles", "vlans", "vrfs"],
+    ipam=["ip_addresses", "prefixes", "roles", "vlans", "vlan_grups", "vrfs"],
     secrets=[],
     tenancy=["tenants", "tenant_groups"],
     virtualization=["clusters"]
@@ -33,6 +33,7 @@ QUERY_TYPES = dict(
     tenant="slug",
     tenant_group="slug",
     vlan="name",
+    vlan_group="slug",
     vrf="name"
 )
 
@@ -53,6 +54,7 @@ CONVERT_TO_ID = dict(
     tenant="tenants",
     tenant_group="tenant_groups",
     vlan="vlans",
+    vlan_group="vlan_groups",
     vrf="vrfs"
 )
 
@@ -65,6 +67,7 @@ NO_DEFAULT_ID = set([
     "primary_ip",
     "primary_ip4",
     "primary_ip6",
+    "role",
     "vlan",
     "vrf",
     "nat_inside",
@@ -144,23 +147,23 @@ def find_ids(nb, data):
                 if v.get("name"):
                     vlan_dict.update({"name": v["name"]})
                 if v.get("site"):
-                    site_id = nb.dcim.sites.get(**{"name": v["site"]})
+                    site_id = nb.dcim.sites.get(**{"slug": v["site"]})
                     try:
                         vlan_dict.update({"site_id": site_id.id})
                     except AttributeError:
-                        return {"failed": "Did not find any results for site - The search is case-senstive"}
+                        return {"failed": "Did not find any results for site"}
                 if v.get("vlan_group"):
-                    vlan_group_id = nb.ipam.vlan_groups.get(**{"name": v["vlan_group"]})
+                    vlan_group_id = nb.ipam.vlan_groups.get(**{"slug": v["vlan_group"]})
                     try:
                         vlan_dict.update({"group_id": vlan_group_id.id})
                     except AttributeError:
-                        return {"failed": "Did not find any results for vlan_group - The search is case-senstive"}
+                        return {"failed": "Did not find any results for vlan_group"}
                 if v.get("tenant"):
-                    tenant_id = nb.tenancy.tenants.get(**{"name": v["tenant"]})
+                    tenant_id = nb.tenancy.tenants.get(**{"slug": v["tenant"]})
                     try:
                         vlan_dict.update({"tenant_id": tenant_id.id})
                     except AttributeError:
-                        return {"failed": "Did not find any results for tenant - The search is case-senstive"}
+                        return {"failed": "Did not find any results for tenant"}
 
                 try:
                     query_id = nb_endpoint.get(**vlan_dict)
@@ -185,12 +188,24 @@ def find_ids(nb, data):
 
 def normalize_data(data):
     for k, v in data.items():
-        data_type = QUERY_TYPES.get(k, "q")
-        if data_type == "slug":
-            if "-" in v:
-                data[k] = v.replace(" ", "").lower()
-            elif " " in v:
-                data[k] = v.replace(" ", "-").lower()
-            else:
-                data[k] = v.lower()
+        if isinstance(v, dict):
+            for subk, subv in v.items():
+                sub_data_type = QUERY_TYPES.get(subk, "q")
+                if sub_data_type == "slug":
+                    if "-" in subv:
+                        data[k][subk] = subv.replace(" ", "").lower()
+                    elif " " in subv:
+                        data[k][subk] = subv.replace(" ", "-").lower()
+                    else:
+                        data[k][subk] = subv.lower()
+        else:
+            data_type = QUERY_TYPES.get(k, "q")
+            if data_type == "slug":
+                if "-" in v:
+                    data[k] = v.replace(" ", "").lower()
+                elif " " in v:
+                    data[k] = v.replace(" ", "-").lower()
+                else:
+                    data[k] = v.lower()
     return data
+
