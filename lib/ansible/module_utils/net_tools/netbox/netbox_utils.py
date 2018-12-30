@@ -208,4 +208,3 @@ def normalize_data(data):
                 else:
                     data[k] = v.lower()
     return data
-
