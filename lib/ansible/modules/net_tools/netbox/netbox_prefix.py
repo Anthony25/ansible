@@ -233,7 +233,7 @@ def ensure_prefix_present(nb, nb_endpoint, data):
 
         data = find_ids(nb, data)
 
-        if not isinstance(data, 'dict'):
+        if not isinstance(data, dict):
             changed = False
             return {"msg": data, "changed": changed}
 
@@ -247,7 +247,7 @@ def ensure_prefix_present(nb, nb_endpoint, data):
             prefix = nb_endpoint.get(q=network, mask_length=mask, vrf="null")
         except ValueError:
             changed = False
-            return {"prefix": "", "msg": "Returned more than one result - Try specifying VRF.", "changed": changed}
+            return {"msg": "Returned more than one result - Try specifying VRF.", "changed": changed}
 
     if not prefix:
         prefix = _netbox_create_prefix(nb_endpoint, data).serialize()
