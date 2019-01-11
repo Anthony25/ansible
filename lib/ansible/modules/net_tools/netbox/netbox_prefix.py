@@ -151,10 +151,14 @@ EXAMPLES = r"""
 """
 
 RETURN = r"""
-meta:
-  description: Message indicating failure or success and returns results with the object created within Netbox
-  returned: always
+prefix:
+  description: Serialized object as created or already existent within Netbox
+  returned: on creation
   type: dict
+msg:
+  description: Message indicating failure or info about what has been achieved
+  returned: always
+  type: str
 """
 
 from ansible.module_utils.basic import AnsibleModule
@@ -165,100 +169,6 @@ try:
     HAS_PYNETBOX = True
 except ImportError:
     HAS_PYNETBOX = False
-
-
-def netbox_create_prefix(nb, nb_endpoint, data):
-    result = {}
-    prefix_list = data["prefix"].split('/')
-    network = prefix_list[0]
-    mask = prefix_list[1]
-    if data.get("vrf"):
-        norm_data = normalize_data(data)
-        if norm_data.get("status"):
-            norm_data["status"] = PREFIX_STATUS.get(norm_data["status"].lower())
-
-        data = find_ids(nb, norm_data)
-
-        if data.get("failed"):
-            result.update(data)
-            return result
-        try:
-            endpoint = nb_endpoint.get(q=network, mask_length=mask, vrf_id=data["vrf"])
-        except ValueError:
-            result.update({"failed": "Returned more than one result"})
-            return result
-
-        if not endpoint:
-            try:
-                resp = nb_endpoint.create(data)
-                resp_ser = resp.serialize()
-                result.update({'success': resp_ser})
-            except pynetbox.RequestError as e:
-                return json.loads(e.error)
-        else:
-            result.update({"failed": "%s already exists in Netbox" % (data["prefix"])})
-
-    else:
-        try:
-            endpoint = nb_endpoint.get(q=network, mask_length=mask, vrf="null")
-        except ValueError:
-            result.update({"failed": "Returned more than one result. Try specifying VRF."})
-            return result
-        if not endpoint:
-            norm_data = normalize_data(data)
-
-            if norm_data.get("status"):
-                norm_data["status"] = PREFIX_STATUS.get(norm_data["status"].lower())
-
-            data = find_ids(nb, norm_data)
-
-            if data.get("failed"):
-                result.update(data)
-                return result
-
-            try:
-                resp = nb_endpoint.create(data)
-                resp_ser = resp.serialize()
-                result.update({'success': resp_ser})
-            except pynetbox.RequestError as e:
-                return json.loads(e.error)
-        else:
-            result.update({"failed": "%s already exists in Netbox" % (data["prefix"])})
-
-    return result
-
-
-def netbox_delete_prefix(nb, nb_endpoint, data):
-    norm_data = normalize_data(data)
-    prefix_list = data["prefix"].split("/")
-    network = prefix_list[0]
-    mask = prefix_list[1]
-    result = {}
-    if data.get("vrf"):
-        data = find_ids(nb, norm_data)
-        try:
-            endpoint = nb_endpoint.get(q=network, mask_length=mask, vrf_id=data["vrf"])
-        except ValueError:
-            result.update({"failed": "Returned more than one result"})
-            return result
-
-        try:
-            if endpoint.delete():
-                result.update({"success": "%s deleted from Netbox" % (norm_data["prefix"])})
-        except AttributeError:
-            result.update({"failed": "%s not found" % (norm_data["prefix"])})
-    else:
-        try:
-            endpoint = nb_endpoint.get(q=network, mask_length=mask, vrf="null")
-        except ValueError:
-            result.update({"failed": "Returned more than one result. Try specifying VRF"})
-            return result
-        try:
-            if endpoint.delete():
-                result.update({"success": "%s deleted from Netbox" % (norm_data["prefix"])})
-        except AttributeError:
-            result.update({"failed": "%s not found" % (norm_data["prefix"])})
-    return result
 
 
 def main():
@@ -278,7 +188,6 @@ def main():
     if not HAS_PYNETBOX:
         module.fail_json(msg="pynetbox is required for this module")
     # Assign variables to be used with module
-    changed = False
     app = "ipam"
     endpoint = "prefixes"
     url = module.params["netbox_url"]
@@ -296,15 +205,95 @@ def main():
     except AttributeError:
         module.fail_json(msg="Incorrect application specified: %s" % (app))
     nb_endpoint = getattr(nb_app, endpoint)
-    if "present" in state:
-        response = netbox_create_prefix(nb, nb_endpoint, data)
-        if response.get("success"):
-            changed = True
+    norm_data = normalize_data(data)
+    try:
+        if "present" in state:
+            return module.exit_json(
+                **ensure_prefix_present(nb, nb_endpoint, norm_data)
+            )
+        else:
+            return module.exit_json(
+                **ensure_prefix_absent(nb, nb_endpoint, norm_data)
+            )
+    except pynetbox.RequestError as e:
+        return module.fail_json(msg=json.loads(e.error))
+
+
+def ensure_prefix_present(nb, nb_endpoint, data):
+    """
+    :returns dict(prefix, msg, changed): dictionary resulting of the request,
+    where 'prefix' is the serialized device fetched or newly created in Netbox
+    """
+    prefix_list = data["prefix"].split('/')
+    network = prefix_list[0]
+    mask = prefix_list[1]
+    if data.get("vrf"):
+        if data.get("status"):
+            data["status"] = PREFIX_STATUS.get(data["status"].lower())
+
+        data = find_ids(nb, data)
+
+        if not isinstance(data, 'dict'):
+            changed = False
+            return {"msg": data, "changed": changed}
+
+        try:
+            prefix = nb_endpoint.get(q=network, mask_length=mask, vrf_id=data["vrf"])
+        except ValueError:
+            changed = False
+            return {"msg": "Returned more than one result", "changed": changed}
     else:
-        response = netbox_delete_prefix(nb, nb_endpoint, data)
-        if response.get("success"):
-            changed = True
-    module.exit_json(changed=changed, meta=response)
+        try:
+            prefix = nb_endpoint.get(q=network, mask_length=mask, vrf="null")
+        except ValueError:
+            changed = False
+            return {"prefix": "", "msg": "Returned more than one result - Try specifying VRF.", "changed": changed}
+
+    if not prefix:
+        prefix = _netbox_create_prefix(nb_endpoint, data).serialize()
+        changed = True
+        msg = "Prefix %s created" % (data["prefix"])
+    else:
+        prefix = prefix.serialize()
+        msg = "Prefix %s already exists" % (data["prefix"])
+        changed = False
+
+    return {"prefix": prefix, "msg": msg, "changed": changed}
+
+
+def _netbox_create_prefix(nb_endpoint, data):
+    return nb_endpoint.create(data)
+
+
+def ensure_prefix_absent(nb, nb_endpoint, data):
+    """
+    :returns dict(msg, changed)
+    """
+    prefix_list = data["prefix"].split("/")
+    network = prefix_list[0]
+    mask = prefix_list[1]
+    if data.get("vrf"):
+        data = find_ids(nb, data)
+        try:
+            prefix = nb_endpoint.get(q=network, mask_length=mask, vrf_id=data["vrf"])
+        except ValueError:
+            changed = False
+            return {"msg": "Returned more than one result", "changed": changed}
+    else:
+        try:
+            prefix = nb_endpoint.get(q=network, mask_length=mask, vrf="null")
+        except ValueError:
+            return {"msg": "Returned more than one result - Try specifying VRF.", "changed": changed}
+
+    if prefix:
+        prefix.delete()
+        changed = True
+        msg = "Prefix %s deleted" % (data["prefix"])
+    else:
+        msg = "Prefix %s already absent" % (data["prefix"])
+        changed = False
+
+    return {"msg": msg, "changed": changed}
 
 
 if __name__ == "__main__":
