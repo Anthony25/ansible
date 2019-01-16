@@ -163,6 +163,8 @@ msg:
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.net_tools.netbox.netbox_utils import find_ids, normalize_data, PREFIX_STATUS
+from ansible.module_utils.compat import ipaddress
+from ansible.module_utils._text import to_text
 import json
 try:
     import pynetbox
@@ -224,9 +226,9 @@ def ensure_prefix_present(nb, nb_endpoint, data):
     :returns dict(prefix, msg, changed): dictionary resulting of the request,
     where 'prefix' is the serialized device fetched or newly created in Netbox
     """
-    prefix_list = data["prefix"].split('/')
-    network = prefix_list[0]
-    mask = prefix_list[1]
+    prefix = ipaddress.ip_network(data["prefix"])
+    network = to_text(prefix.network_address)
+    mask = prefix.prefixlen
     if data.get("vrf"):
         if data.get("status"):
             data["status"] = PREFIX_STATUS.get(data["status"].lower())
@@ -250,7 +252,7 @@ def ensure_prefix_present(nb, nb_endpoint, data):
             return {"msg": "Returned more than one result - Try specifying VRF.", "changed": changed}
 
     if not prefix:
-        prefix = _netbox_create_prefix(nb_endpoint, data).serialize()
+        prefix = nb_endpoint.create(data).serialize()
         changed = True
         msg = "Prefix %s created" % (data["prefix"])
     else:
@@ -261,17 +263,13 @@ def ensure_prefix_present(nb, nb_endpoint, data):
     return {"prefix": prefix, "msg": msg, "changed": changed}
 
 
-def _netbox_create_prefix(nb_endpoint, data):
-    return nb_endpoint.create(data)
-
-
 def ensure_prefix_absent(nb, nb_endpoint, data):
     """
     :returns dict(msg, changed)
     """
-    prefix_list = data["prefix"].split("/")
-    network = prefix_list[0]
-    mask = prefix_list[1]
+    prefix = ipaddress.ip_network(data["prefix"])
+    network = to_text(prefix.network_address)
+    mask = prefix.prefixlen
     if data.get("vrf"):
         data = find_ids(nb, data)
         try:
