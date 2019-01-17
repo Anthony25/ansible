@@ -139,12 +139,12 @@ def find_ids(nb, data):
                     if vrf_id:
                         query_id = nb_endpoint.get(**{"address": v["address"], "vrf_id": vrf_id.id})
                     else:
-                        return "%s does not exist - Please create VRF" % (data["vrf"])
+                        raise ValueError("%s does not exist - Please create VRF" % (data["vrf"]))
                 else:
                     try:
                         query_id = nb_endpoint.get(**{"address": v["address"]})
                     except ValueError:
-                        return "Multiple results found while searching for %s: %s - Specify a VRF within %s" % (k, v["address"], k)
+                        raise ValueError("Multiple results found while searching for %s: %s - Specify a VRF within %s" % (k, v["address"], k))
             elif k == "vlan":
                 vlan_dict = {}
                 if v.get("name"):
@@ -154,30 +154,30 @@ def find_ids(nb, data):
                     try:
                         vlan_dict.update({"site_id": site_id.id})
                     except AttributeError:
-                        return "Did not find any results for site"
+                        return AttributeError("Did not find any results for site")
                 if v.get("vlan_group"):
                     vlan_group_id = nb.ipam.vlan_groups.get(**{"slug": v["vlan_group"]})
                     try:
                         vlan_dict.update({"group_id": vlan_group_id.id})
                     except AttributeError:
-                        return "Did not find any results for vlan_group"
+                        return AttributeError("Did not find any results for vlan_group")
                 if v.get("tenant"):
                     tenant_id = nb.tenancy.tenants.get(**{"slug": v["tenant"]})
                     try:
                         vlan_dict.update({"tenant_id": tenant_id.id})
                     except AttributeError:
-                        return "Did not find any results for tenant"
+                        return AttributeError("Did not find any results for tenant")
 
                 try:
                     query_id = nb_endpoint.get(**vlan_dict)
                 except ValueError:
-                    return "Multiple results found while searching for key: %s" % (k)
+                    return ValueError("Multiple results found while searching for key: %s" % (k))
 
             else:
                 try:
                     query_id = nb_endpoint.get(**{QUERY_TYPES.get(k, "q"): search})
                 except ValueError:
-                    return "Multiple results found while searching for key: %s" % (k)
+                    return ValueError("Multiple results found while searching for key: %s" % (k))
 
             if query_id:
                 data[k] = query_id.id

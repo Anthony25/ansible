@@ -219,6 +219,10 @@ def main():
             )
     except pynetbox.RequestError as e:
         return module.fail_json(msg=json.loads(e.error))
+    except ValueError as e:
+        return module.fail_json(msg=str(e))
+    except AttributeError as e:
+        return module.fail_json(msg=str(e))
 
 
 def ensure_prefix_present(nb, nb_endpoint, data):
@@ -229,21 +233,23 @@ def ensure_prefix_present(nb, nb_endpoint, data):
     prefix = ipaddress.ip_network(data["prefix"])
     network = to_text(prefix.network_address)
     mask = prefix.prefixlen
+
+    data = find_ids(nb, data)
+    if not isinstance(data, dict):
+        changed = False
+        return {"msg": data, "changed": changed}
     if data.get("vrf"):
         if data.get("status"):
             data["status"] = PREFIX_STATUS.get(data["status"].lower())
 
-        data = find_ids(nb, data)
-
-        if not isinstance(data, dict):
-            changed = False
-            return {"msg": data, "changed": changed}
-
-        try:
-            prefix = nb_endpoint.get(q=network, mask_length=mask, vrf_id=data["vrf"])
-        except ValueError:
-            changed = False
-            return {"msg": "Returned more than one result", "changed": changed}
+        if not isinstance(data["vrf"], int):
+            raise ValueError("%s does not exist - Please create VRF" % (data["vrf"]))
+        else:
+            try:
+                prefix = nb_endpoint.get(q=network, mask_length=mask, vrf_id=data["vrf"])
+            except ValueError:
+                changed = False
+                return {"msg": "Returned more than one result", "changed": changed}
     else:
         try:
             prefix = nb_endpoint.get(q=network, mask_length=mask, vrf="null")
