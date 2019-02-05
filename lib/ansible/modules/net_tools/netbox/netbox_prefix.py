@@ -46,7 +46,16 @@ options:
           - 6
       prefix:
         description:
-          - Required if state is C(present)
+          - Required if state is C(present) and first_available is C(false)
+      parent:
+        description:
+          - Required if state is C(present) and first_available is C(true).
+            Will get a new available prefix in this parent prefix.
+      size:
+        description:
+          - Required if state is C(present) and first_available is C(true).
+            Will get a new available prefix of the given size in this parent
+            prefix.
       site:
         description:
           - Site that prefix is associated with
@@ -89,6 +98,12 @@ options:
       - Use C(present) or C(absent) for adding or removing.
     choices: [ absent, present ]
     default: present
+  first_available:
+    description:
+      - If C(yes), it will get the next available prefix of the given size in
+        the given parent prefix.
+    default: "no"
+    type: bool
   validate_certs:
     description:
       - If C(no), SSL certificates will not be validated. This should only be used on personally controlled sites using self-signed certificates.
@@ -230,32 +245,15 @@ def ensure_prefix_present(nb, nb_endpoint, data):
     :returns dict(prefix, msg, changed): dictionary resulting of the request,
     where 'prefix' is the serialized device fetched or newly created in Netbox
     """
-    prefix = ipaddress.ip_network(data["prefix"])
-    network = to_text(prefix.network_address)
-    mask = prefix.prefixlen
-
     data = find_ids(nb, data)
     if not isinstance(data, dict):
         changed = False
         return {"msg": data, "changed": changed}
-    if data.get("vrf"):
-        if data.get("status"):
-            data["status"] = PREFIX_STATUS.get(data["status"].lower())
 
-        if not isinstance(data["vrf"], int):
-            raise ValueError("%s does not exist - Please create VRF" % (data["vrf"]))
-        else:
-            try:
-                prefix = nb_endpoint.get(q=network, mask_length=mask, vrf_id=data["vrf"])
-            except ValueError:
-                changed = False
-                return {"msg": "Returned more than one result", "changed": changed}
-    else:
-        try:
-            prefix = nb_endpoint.get(q=network, mask_length=mask, vrf="null")
-        except ValueError:
-            changed = False
-            return {"msg": "Returned more than one result - Try specifying VRF.", "changed": changed}
+    try:
+        prefix = _search_prefix(nb_endpoint, data)
+    except ValueError:
+        return _error_multiple_prefix_results(data)
 
     if not prefix:
         prefix = nb_endpoint.create(data).serialize()
@@ -269,25 +267,44 @@ def ensure_prefix_present(nb, nb_endpoint, data):
     return {"prefix": prefix, "msg": msg, "changed": changed}
 
 
+def _search_prefix(nb_endpoint, data):
+    prefix = ipaddress.ip_network(data["prefix"])
+    network = to_text(prefix.network_address)
+    mask = prefix.prefixlen
+
+    if data.get("status"):
+        data["status"] = PREFIX_STATUS.get(data["status"].lower())
+    if data.get("vrf"):
+        if not isinstance(data["vrf"], int):
+            raise ValueError("%s does not exist - Please create VRF" % (data["vrf"]))
+        else:
+            prefix = nb_endpoint.get(q=network, mask_length=mask, vrf_id=data["vrf"])
+    else:
+        prefix = nb_endpoint.get(q=network, mask_length=mask, vrf="null")
+
+    return prefix
+
+
+def _error_multiple_prefix_results(data):
+    changed = False
+
+    if data.get("vrf"):
+        return {"msg": "Returned more than one result", "changed": changed}
+    else:
+        return {
+            "msg": "Returned more than one result - Try specifying VRF.",
+            "changed": changed
+        }
+
+
 def ensure_prefix_absent(nb, nb_endpoint, data):
     """
     :returns dict(msg, changed)
     """
-    prefix = ipaddress.ip_network(data["prefix"])
-    network = to_text(prefix.network_address)
-    mask = prefix.prefixlen
-    if data.get("vrf"):
-        data = find_ids(nb, data)
-        try:
-            prefix = nb_endpoint.get(q=network, mask_length=mask, vrf_id=data["vrf"])
-        except ValueError:
-            changed = False
-            return {"msg": "Returned more than one result", "changed": changed}
-    else:
-        try:
-            prefix = nb_endpoint.get(q=network, mask_length=mask, vrf="null")
-        except ValueError:
-            return {"msg": "Returned more than one result - Try specifying VRF.", "changed": changed}
+    try:
+        prefix = _search_prefix(nb_endpoint, data)
+    except ValueError:
+        return _error_multiple_prefix_results(data)
 
     if prefix:
         prefix.delete()
