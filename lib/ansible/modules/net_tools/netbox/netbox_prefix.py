@@ -46,10 +46,11 @@ options:
           - 6
       prefix:
         description:
-          - Required if state is C(present) and first_available is C(false)
+          - Required if state is C(present) and no parent is indicated. Will
+            allocate or free this prefix.
       parent:
         description:
-          - Required if state is C(present) and first_available is C(true).
+          - Required if state is C(present) and no specific prefix specified.
             Will get a new available prefix in this parent prefix.
       size:
         description:
@@ -98,12 +99,6 @@ options:
       - Use C(present) or C(absent) for adding or removing.
     choices: [ absent, present ]
     default: present
-  first_available:
-    description:
-      - If C(yes), it will get the next available prefix of the given size in
-        the given parent prefix.
-    default: "no"
-    type: bool
   validate_certs:
     description:
       - If C(no), SSL certificates will not be validated. This should only be used on personally controlled sites using self-signed certificates.
@@ -250,21 +245,10 @@ def ensure_prefix_present(nb, nb_endpoint, data):
         changed = False
         return {"msg": data, "changed": changed}
 
-    try:
-        prefix = _search_prefix(nb_endpoint, data)
-    except ValueError:
-        return _error_multiple_prefix_results(data)
-
-    if not prefix:
-        prefix = nb_endpoint.create(data).serialize()
-        changed = True
-        msg = "Prefix %s created" % (data["prefix"])
+    if data.get("prefix"):
+        return get_new_available_prefix(nb_endpoint, data)
     else:
-        prefix = prefix.serialize()
-        msg = "Prefix %s already exists" % (data["prefix"])
-        changed = False
-
-    return {"prefix": prefix, "msg": msg, "changed": changed}
+        return get_or_create_prefix(nb_endpoint, data)
 
 
 def _search_prefix(nb_endpoint, data):
@@ -295,6 +279,33 @@ def _error_multiple_prefix_results(data):
             "msg": "Returned more than one result - Try specifying VRF.",
             "changed": changed
         }
+
+
+def get_or_create_prefix(nb_endpoint, data):
+    try:
+        prefix = _search_prefix(nb_endpoint, data)
+    except ValueError:
+        return _error_multiple_prefix_results(data)
+
+    if not prefix:
+        prefix = nb_endpoint.create(data).serialize()
+        changed = True
+        msg = "Prefix %s created" % (data["prefix"])
+    else:
+        prefix = prefix.serialize()
+        msg = "Prefix %s already exists" % (data["prefix"])
+        changed = False
+
+    return {"prefix": prefix, "msg": msg, "changed": changed}
+
+
+def get_new_available_prefix(nb_endpoint, data):
+    parent_prefix = nb_endpoint.get(data["parent"])
+    prefix = parent_prefix.available_prefixes.create(data).serialize()
+    changed = True
+    msg = "Prefix %s created" % (prefix["prefix"])
+
+    return {"prefix": prefix, "msg": msg, "changed": changed}
 
 
 def ensure_prefix_absent(nb, nb_endpoint, data):
