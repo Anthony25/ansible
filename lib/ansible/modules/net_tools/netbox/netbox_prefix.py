@@ -46,15 +46,15 @@ options:
           - 6
       prefix:
         description:
-          - Required if state is C(present) and no parent is indicated. Will
+          - Required if state is C(present) and first_available is False. Will
             allocate or free this prefix.
       parent:
         description:
-          - Required if state is C(present) and no specific prefix specified.
+          - Required if first_available is C(yes).
             Will get a new available prefix in this parent prefix.
       size:
         description:
-          - Required if state is C(present) and first_available is C(true).
+          - Required if state is C(present) and first_available is C(yes).
             Will get a new available prefix of the given size in this parent
             prefix.
       site:
@@ -99,6 +99,15 @@ options:
       - Use C(present) or C(absent) for adding or removing.
     choices: [ absent, present ]
     default: present
+  first_available:
+    description:
+      - If C(yes) and state C(present), if an parent is given, it will get the
+        first available prefix of the given size inside the given parent (and
+        vrf, if given).
+
+        Unused with state C(absent).
+    default: 'no'
+    type: bool
   validate_certs:
     description:
       - If C(no), SSL certificates will not be validated. This should only be used on personally controlled sites using self-signed certificates.
@@ -119,6 +128,17 @@ EXAMPLES = r"""
         data:
           prefix: 10.156.0.0/19
         state: present
+
+    - name: Get a new /24 inside 10.156.0.0/19 within Netbox
+      netbox_prefix:
+        netbox_url: http://netbox.local
+        netbox_token: thisIsMyToken
+        data:
+          parent: 10.156.0.0/19
+          size: 24
+        state: present
+        first_available: yes
+      register: prefix
 
     - name: Delete prefix within netbox
       netbox_prefix:
@@ -176,6 +196,7 @@ from ansible.module_utils.net_tools.netbox.netbox_utils import find_ids, normali
 from ansible.module_utils.compat import ipaddress
 from ansible.module_utils._text import to_text
 import json
+import re
 try:
     import pynetbox
     HAS_PYNETBOX = True
@@ -206,6 +227,7 @@ def main():
     token = module.params["netbox_token"]
     data = module.params["data"]
     state = module.params["state"]
+    first_available = module.params["first_available"]
     validate_certs = module.params["validate_certs"]
     # Attempt to create Netbox API object
     try:
@@ -220,9 +242,9 @@ def main():
     norm_data = normalize_data(data)
     try:
         if "present" in state:
-            return module.exit_json(
-                **ensure_prefix_present(nb, nb_endpoint, norm_data)
-            )
+            return module.exit_json(**ensure_prefix_present(
+                nb, nb_endpoint, norm_data, first_available
+            ))
         else:
             return module.exit_json(
                 **ensure_prefix_absent(nb, nb_endpoint, norm_data)
@@ -235,7 +257,7 @@ def main():
         return module.fail_json(msg=str(e))
 
 
-def ensure_prefix_present(nb, nb_endpoint, data):
+def ensure_prefix_present(nb, nb_endpoint, data, first_available=False):
     """
     :returns dict(prefix, msg, changed): dictionary resulting of the request,
     where 'prefix' is the serialized device fetched or newly created in Netbox
@@ -245,13 +267,24 @@ def ensure_prefix_present(nb, nb_endpoint, data):
         changed = False
         return {"msg": data, "changed": changed}
 
-    if data.get("prefix"):
-        return get_new_available_prefix(nb_endpoint, data)
-    else:
+    if first_available:
+        for k in ("parent", "size"):
+            if k not in data:
+                raise ValueError("'%s' is required with first_available" % k)
+
         return get_or_create_prefix(nb_endpoint, data)
+    else:
+        if "prefix" not in data:
+            raise ValueError("'prefix' is required without first_available")
+
+        return get_new_available_prefix(nb_endpoint, data)
 
 
 def _search_prefix(nb_endpoint, data):
+    if data.get("size") and not re.match(r".*/\d*", data["prefix"]):
+        data["prefix"] += "/%s" % data["size"]
+        prefix = ipaddress.ip_network(data["prefix"])
+
     prefix = ipaddress.ip_network(data["prefix"])
     network = to_text(prefix.network_address)
     mask = prefix.prefixlen
@@ -290,10 +323,10 @@ def get_or_create_prefix(nb_endpoint, data):
     if not prefix:
         prefix = nb_endpoint.create(data).serialize()
         changed = True
-        msg = "Prefix %s created" % (data["prefix"])
+        msg = "Prefix %s created" % (prefix["prefix"])
     else:
         prefix = prefix.serialize()
-        msg = "Prefix %s already exists" % (data["prefix"])
+        msg = "Prefix %s already exists" % (prefix["prefix"])
         changed = False
 
     return {"prefix": prefix, "msg": msg, "changed": changed}
@@ -320,9 +353,9 @@ def ensure_prefix_absent(nb, nb_endpoint, data):
     if prefix:
         prefix.delete()
         changed = True
-        msg = "Prefix %s deleted" % (data["prefix"])
+        msg = "Prefix %s deleted" % (prefix.prefix)
     else:
-        msg = "Prefix %s already absent" % (data["prefix"])
+        msg = "Prefix %s already absent" % (prefix.prefix)
         changed = False
 
     return {"msg": msg, "changed": changed}
